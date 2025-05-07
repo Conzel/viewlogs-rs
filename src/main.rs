@@ -1,8 +1,19 @@
 use clap::Parser;
+use snafu::{ResultExt, Snafu};
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self};
 use std::io::{self, Error, ErrorKind};
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, Snafu)]
+enum ProgramError {
+    #[snafu(display("Could not find file {}", path.display()))]
+    FileNotFound { source: io::Error, path: PathBuf },
+    #[snafu(display("Could not find log in {} with ending {}", dir.display(), ending))]
+    LogNotFound { dir: PathBuf, ending: String },
+}
+
+type PResult<T> = Result<T, ProgramError>;
 
 #[derive(Parser)]
 struct Cli {
@@ -10,8 +21,11 @@ struct Cli {
     jobid: String,
 }
 
-fn get_subdirectories<P: AsRef<Path>>(start: P) -> io::Result<Vec<PathBuf>> {
-    Ok(fs::read_dir(start)?
+fn get_subdirectories<P: AsRef<Path>>(start: P) -> PResult<Vec<PathBuf>> {
+    Ok(fs::read_dir(&start)
+        .context(FileNotFoundSnafu {
+            path: start.as_ref().to_path_buf(),
+        })?
         .into_iter()
         .filter_map(|entry| {
             let entry = entry.ok()?;
@@ -27,9 +41,10 @@ fn get_subdirectories<P: AsRef<Path>>(start: P) -> io::Result<Vec<PathBuf>> {
 //   1. Flatten the nested datetime structs
 //   2. Find all job ids and make a map: (job_id,path_to_job_id_dir)
 //   3. Use job + arr id to find the correct job
-fn build_job_map<P: AsRef<Path>>(start: P) -> io::Result<HashMap<String, PathBuf>> {
+fn build_job_map<P: AsRef<Path>>(start: P) -> PResult<HashMap<String, PathBuf>> {
     let mut jobmap = HashMap::new();
     let start = start.as_ref();
+
     for ymd in get_subdirectories(start)? {
         for hms in get_subdirectories(ymd)? {
             for job in get_subdirectories(hms.join(".submitit"))? {
@@ -42,17 +57,25 @@ fn build_job_map<P: AsRef<Path>>(start: P) -> io::Result<HashMap<String, PathBuf
     Ok(jobmap)
 }
 
-fn get_log<P: AsRef<Path>>(dir: P, ending: &str) -> io::Result<PathBuf> {
-    for entry in fs::read_dir(dir.as_ref())? {
-        let f = entry?;
-        if f.file_type()?.is_file() && f.path().extension().map_or(false, |ext| ext == ending) {
+fn get_log<P: AsRef<Path>>(dir: P, ending: &str) -> PResult<PathBuf> {
+    let dir = dir.as_ref();
+    for entry in fs::read_dir(dir).context(FileNotFoundSnafu {
+        path: dir.to_path_buf(),
+    })? {
+        let f = entry.context(FileNotFoundSnafu {
+            path: dir.to_path_buf(),
+        })?;
+        if f.file_type().unwrap().is_file()
+            && f.path().extension().map_or(false, |ext| ext == ending)
+        {
             return Ok(f.path());
         }
     }
-    Err(Error::new(
-        ErrorKind::Other,
-        "Could not find log".to_string(),
-    ))
+    Err(LogNotFoundSnafu {
+        dir: dir.to_path_buf(),
+        ending: ending.to_string(),
+    }
+    .build())
 }
 
 fn main() {
