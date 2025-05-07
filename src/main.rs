@@ -134,6 +134,10 @@ fn view(v: ViewOpts) {
     }
 }
 
+// TODO: Write a more intuitive comparison function for the job ids
+// fn compare_job_ids(a: &String, b: &String) {
+// }
+
 fn search(s: SearchOpts) {
     let pattern = s.pattern;
     let regex = Regex::new(&pattern).unwrap();
@@ -142,7 +146,7 @@ fn search(s: SearchOpts) {
     let mut entries: Vec<_> = job_map.iter().collect();
     entries.sort_by(|a, b| b.0.cmp(a.0));
 
-    for (id, dir) in job_map.iter() {
+    for (id, dir) in entries.iter() {
         let log_fp = get_log_pathbuf(dir, "out");
         if log_fp.is_err() {
             continue;
