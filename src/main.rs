@@ -4,8 +4,9 @@ use regex::Regex;
 use snafu::{ResultExt, Snafu};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{self, Error, ErrorKind, Read};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::process::Command as ProcCommand;
 
 #[derive(Debug, Snafu)]
 enum ProgramError {
@@ -16,6 +17,29 @@ enum ProgramError {
 }
 
 type PResult<T> = Result<T, ProgramError>;
+
+fn get_active_slurm_jobs() -> Vec<String> {
+    let mut cmd = ProcCommand::new("squeue");
+    cmd.arg("-h");
+    cmd.arg("-o");
+    cmd.arg("-%i");
+    cmd.arg("--me");
+    cmd.arg("-t");
+    cmd.arg("RUNNING");
+    let output = cmd.output().unwrap();
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let job_ids = stdout
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    job_ids
+}
 
 #[derive(Parser)]
 struct Cli {
@@ -31,6 +55,10 @@ struct ViewOpts {
 #[derive(Parser, Debug)]
 struct SearchOpts {
     pattern: String,
+    #[arg(long, default_value_t = false)]
+    ids: bool,
+    #[arg(long, default_value_t = false)]
+    active: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -134,10 +162,6 @@ fn view(v: ViewOpts) {
     }
 }
 
-// TODO: Write a more intuitive comparison function for the job ids
-// fn compare_job_ids(a: &String, b: &String) {
-// }
-
 fn search(s: SearchOpts) {
     let pattern = s.pattern;
     let regex = Regex::new(&pattern).unwrap();
@@ -146,14 +170,43 @@ fn search(s: SearchOpts) {
     let mut entries: Vec<_> = job_map.iter().collect();
     entries.sort_by(|a, b| b.0.cmp(a.0));
 
+    let active_jobs = if s.active {
+        get_active_slurm_jobs()
+    } else {
+        Vec::new()
+    };
+
     for (id, dir) in entries.iter() {
+        if s.active && !active_jobs.contains(id) {
+            continue;
+        }
         let log_fp = get_log_pathbuf(dir, "out");
         if log_fp.is_err() {
             continue;
         }
         let log_content = get_log_content(log_fp.unwrap()).unwrap_or("".to_string());
-        if regex.is_match(&log_content) {
-            println!("{}", id);
+        let matching_lines = log_content
+            .lines()
+            .filter_map(|line| {
+                regex.is_match(line).then(|| {
+                    regex.replace_all(line, |cap: &regex::Captures| cap[0].red().to_string())
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if matching_lines.len() == 0 {
+            continue;
+        }
+
+        if s.ids {
+            println!("{id}");
+        } else {
+            let header = format!("{}:", dir.to_string_lossy());
+            let dashes = "-".repeat(header.len());
+            println!("{}\n{dashes}", header.bold());
+            for line in matching_lines {
+                println!("{}", line);
+            }
         }
     }
 }
