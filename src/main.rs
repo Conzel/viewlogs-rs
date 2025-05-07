@@ -1,4 +1,5 @@
 use clap::Parser;
+use colored::Colorize;
 use snafu::{ResultExt, Snafu};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -7,9 +8,9 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Snafu)]
 enum ProgramError {
-    #[snafu(display("Could not find file {}", path.display()))]
+    #[snafu(display("Could not find file {}.", path.display()))]
     FileNotFound { source: io::Error, path: PathBuf },
-    #[snafu(display("Could not find log in {} with ending {}", dir.display(), ending))]
+    #[snafu(display("Could not find log in {} with ending {}.", dir.display(), ending))]
     LogNotFound { dir: PathBuf, ending: String },
 }
 
@@ -103,21 +104,15 @@ fn main() {
     let target = cli.jobid;
     let job_map = build_job_map("multirun").unwrap();
     let job_path = job_map[&target].clone();
-    let header_len =
-        "Reporting out file for job at ".len() + job_path.clone().into_os_string().len() + 3;
-    let dashes = "-".repeat(header_len);
+    for ending in ["out", "err"] {
+        let header = format!("Reporting {ending} file for job at {:?}:", job_path);
+        let dashes = "-".repeat(header.len());
 
-    println!(
-        "\nReporting out file for job at {:?}: \n{}\n{}",
-        job_path.clone(),
-        dashes.clone(),
-        get_log_content_or_error(job_path.clone(), "out")
-    );
-
-    println!(
-        "\nReporting err file for job at {:?}: \n{}\n{}",
-        job_path.clone(),
-        dashes.clone(),
-        get_log_content_or_error(job_path.clone(), "err")
-    );
+        println!(
+            "{}\n{}\n{}\n",
+            header.bold(),
+            dashes.clone(),
+            get_log_content_or_error(job_path.clone(), ending)
+        );
+    }
 }
