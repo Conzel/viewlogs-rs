@@ -22,7 +22,7 @@ fn get_active_slurm_jobs() -> Vec<String> {
     let mut cmd = ProcCommand::new("squeue");
     cmd.arg("-h");
     cmd.arg("-o");
-    cmd.arg("-%i");
+    cmd.arg("%i");
     cmd.arg("--me");
     cmd.arg("-t");
     cmd.arg("RUNNING");
