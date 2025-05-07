@@ -1,8 +1,8 @@
 use clap::Parser;
 use snafu::{ResultExt, Snafu};
 use std::collections::HashMap;
-use std::fs::{self};
-use std::io::{self, Error, ErrorKind};
+use std::fs::{self, File};
+use std::io::{self, Error, ErrorKind, Read};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Snafu)]
@@ -61,6 +61,22 @@ fn build_job_map<P: AsRef<Path>>(start: P) -> PResult<HashMap<String, PathBuf>> 
     Ok(jobmap)
 }
 
+fn get_log_content_or_error<P: AsRef<Path>>(dir: P, ending: &str) -> String {
+    let log_fp = get_log(dir, ending);
+    if log_fp.is_err() {
+        return log_fp.err().unwrap().to_string();
+    }
+    let log_content = get_log_content(log_fp.unwrap());
+    log_content.unwrap_or("Could not read log.".to_string())
+}
+
+fn get_log_content<P: AsRef<Path>>(filepath: P) -> Option<String> {
+    let mut file = File::open(filepath).ok()?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).ok()?;
+    Some(contents)
+}
+
 fn get_log<P: AsRef<Path>>(dir: P, ending: &str) -> PResult<PathBuf> {
     let dir = dir.as_ref();
     for entry in fs::read_dir(dir).context(FileNotFoundSnafu {
@@ -86,6 +102,22 @@ fn main() {
     let cli = Cli::parse();
     let target = cli.jobid;
     let job_map = build_job_map("multirun").unwrap();
-    println!("{:?}", job_map);
-    println!("{:?}", get_log(&job_map[&target], "out").unwrap());
+    let job_path = job_map[&target].clone();
+    let header_len =
+        "Reporting out file for job at ".len() + job_path.clone().into_os_string().len() + 3;
+    let dashes = "-".repeat(header_len);
+
+    println!(
+        "\nReporting out file for job at {:?}: \n{}\n{}",
+        job_path.clone(),
+        dashes.clone(),
+        get_log_content_or_error(job_path.clone(), "out")
+    );
+
+    println!(
+        "\nReporting err file for job at {:?}: \n{}\n{}",
+        job_path.clone(),
+        dashes.clone(),
+        get_log_content_or_error(job_path.clone(), "err")
+    );
 }
