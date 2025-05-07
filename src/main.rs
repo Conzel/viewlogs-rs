@@ -139,6 +139,9 @@ fn search(s: SearchOpts) {
     let regex = Regex::new(&pattern).unwrap();
     let job_map = build_job_map("multirun").unwrap();
 
+    let mut entries: Vec<_> = job_map.iter().collect();
+    entries.sort_by(|a, b| b.0.cmp(a.0));
+
     for (id, dir) in job_map.iter() {
         let log_fp = get_log_pathbuf(dir, "out");
         if log_fp.is_err() {
