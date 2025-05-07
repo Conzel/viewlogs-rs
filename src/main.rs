@@ -47,7 +47,11 @@ fn build_job_map<P: AsRef<Path>>(start: P) -> PResult<HashMap<String, PathBuf>> 
 
     for ymd in get_subdirectories(start)? {
         for hms in get_subdirectories(ymd)? {
-            for job in get_subdirectories(hms.join(".submitit"))? {
+            let submitit_dir = hms.join(".submitit");
+            if !submitit_dir.exists() {
+                continue;
+            }
+            for job in get_subdirectories(submitit_dir)? {
                 if let Some(name) = job.file_name() {
                     jobmap.insert(name.to_str().unwrap().to_string(), job);
                 }
