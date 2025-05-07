@@ -1,5 +1,6 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use colored::Colorize;
+use regex::Regex;
 use snafu::{ResultExt, Snafu};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -18,8 +19,25 @@ type PResult<T> = Result<T, ProgramError>;
 
 #[derive(Parser)]
 struct Cli {
-    /// The ID of the job we want to find
+    #[clap(subcommand)]
+    command: Command,
+}
+
+#[derive(Parser, Debug)]
+struct ViewOpts {
     jobid: String,
+}
+
+#[derive(Parser, Debug)]
+struct SearchOpts {
+    pattern: String,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// The ID of the job we want to find
+    View(ViewOpts),
+    Search(SearchOpts),
 }
 
 fn get_subdirectories<P: AsRef<Path>>(start: P) -> PResult<Vec<PathBuf>> {
@@ -62,8 +80,8 @@ fn build_job_map<P: AsRef<Path>>(start: P) -> PResult<HashMap<String, PathBuf>> 
     Ok(jobmap)
 }
 
-fn get_log_content_or_error<P: AsRef<Path>>(dir: P, ending: &str) -> String {
-    let log_fp = get_log(dir, ending);
+fn get_log_content_or_error_msg<P: AsRef<Path>>(dir: P, ending: &str) -> String {
+    let log_fp = get_log_pathbuf(dir, ending);
     if log_fp.is_err() {
         return log_fp.err().unwrap().to_string();
     }
@@ -78,7 +96,7 @@ fn get_log_content<P: AsRef<Path>>(filepath: P) -> Option<String> {
     Some(contents)
 }
 
-fn get_log<P: AsRef<Path>>(dir: P, ending: &str) -> PResult<PathBuf> {
+fn get_log_pathbuf<P: AsRef<Path>>(dir: P, ending: &str) -> PResult<PathBuf> {
     let dir = dir.as_ref();
     for entry in fs::read_dir(dir).context(FileNotFoundSnafu {
         path: dir.to_path_buf(),
@@ -99,9 +117,8 @@ fn get_log<P: AsRef<Path>>(dir: P, ending: &str) -> PResult<PathBuf> {
     .build())
 }
 
-fn main() {
-    let cli = Cli::parse();
-    let target = cli.jobid;
+fn view(v: ViewOpts) {
+    let target = v.jobid;
     let job_map = build_job_map("multirun").unwrap();
     let job_path = job_map[&target].clone();
     for ending in ["out", "err"] {
@@ -112,7 +129,32 @@ fn main() {
             "{}\n{}\n{}\n",
             header.bold(),
             dashes.clone(),
-            get_log_content_or_error(job_path.clone(), ending)
+            get_log_content_or_error_msg(job_path.clone(), ending)
         );
+    }
+}
+
+fn search(s: SearchOpts) {
+    let pattern = s.pattern;
+    let regex = Regex::new(&pattern).unwrap();
+    let job_map = build_job_map("multirun").unwrap();
+
+    for (id, dir) in job_map.iter() {
+        let log_fp = get_log_pathbuf(dir, "out");
+        if log_fp.is_err() {
+            continue;
+        }
+        let log_content = get_log_content(log_fp.unwrap()).unwrap_or("".to_string());
+        if regex.is_match(&log_content) {
+            println!("{}", id);
+        }
+    }
+}
+
+fn main() {
+    let cli = Cli::parse();
+    match cli.command {
+        Command::View(opts) => view(opts),
+        Command::Search(opts) => search(opts),
     }
 }
